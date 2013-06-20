@@ -1,0 +1,10 @@
+Target Platform: Windows
+
+Compilation:
+
+  mkdir build
+  cd build
+  cmake .. -G "NMake Makefiles"
+  nmake
+
+Note: dnssd.lib is a prebuilt binary which configured as Release (/MT).

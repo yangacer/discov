@@ -1,3 +1,4 @@
+#include "discov.hpp"
 #include <Winsock2.h>
 #include <vector>
 #include <sstream>
@@ -8,7 +9,9 @@ struct context
 {
   std::vector<DNSServiceRef> sref_list;
   std::vector<DNSServiceRef> pending_list;
-  
+  std::stringstream *sstream_ptr;
+  int wait_time;
+
   void clear()
   {
     for(auto sref_iter = sref_list.begin(); sref_iter != sref_list.end(); ++sref_iter) {
@@ -64,6 +67,7 @@ static void DNSSD_API handle_resolve(
   context *myctx = (context*)ctx;
   DNSServiceRef myref = 0;
   DNSServiceErrorType myec;
+  stringstream &os = *myctx->sstream_ptr;
 
   if(!ec) {
     myec = DNSServiceGetAddrInfo(
@@ -78,19 +82,19 @@ static void DNSSD_API handle_resolve(
       myctx->pending_list.push_back(myref);
     }
     string n(name);
-    cout << "{\n\"name\" : \"" << n.substr(0, n.find("._")) << "\",\n" ;
+    os<< "{\n\"name\" : \"" << n.substr(0, n.find("._")) << "\",\n" ;
     stringstream addr;
     addr << "\"host\" : \"" << target;
     addr.seekp(-1, ios::end) << ":" << ntohs(port);
-    cout << addr.str() ;
+    os << addr.str() ;
     for(uint16_t i = 0; i != txtLen; ++i)
       if(txtRecord[i] == 0x1a)
-        cout << "\",\n\"";
+        os << "\",\n\"";
       else if(txtRecord[i] == '=')
-        cout << "\" : \"";
+        os << "\" : \"";
       else
-        cout << txtRecord[i];
-    cout << "\"\n},\n";
+        os << txtRecord[i];
+    os << "\"\n},\n";
   }
 }
 
@@ -128,7 +132,7 @@ void do_select(context &ctx)
     FD_SET(fd, &fds);
   }
   for(int i=0; i < 100; ++i) {
-    struct timeval tv = { 2, 5000 };
+    struct timeval tv = { ctx.wait_time, 0 };
     while( 0 < select(0, &fds, 0, 0, &tv) ) {
       for(auto sref_iter = ctx.sref_list.begin(); sref_iter != ctx.sref_list.end(); ++sref_iter) {
         auto fd = DNSServiceRefSockFD(*sref_iter);
@@ -144,31 +148,24 @@ void do_select(context &ctx)
   ctx.swap();
 }
 
-int main(int argc, char **argv)
+void discov(std::stringstream &sstream, char const* type, int wait_time)
 {
   using namespace std;
-
-  if(argc < 2) {
-    cout << 
-      "Usage: discov <service_type>\n" << 
-      "  e.g. discov _nucstcp._tcp\n"
-      ;
-    exit(1);
-  }
 
   context ctx;
   DNSServiceRef sref = 0;
   DNSServiceErrorType ec = 0;
 
-  ec = DNSServiceBrowse(&sref, 0, 0, argv[1], 0, &handle_browse, (void*)&ctx);
+  ctx.sstream_ptr = &sstream;
+  ctx.wait_time = wait_time;
+
+  ec = DNSServiceBrowse(&sref, 0, 0, type, 0, &handle_browse, (void*)&ctx);
   
   if(!ec) {
-    cout << "{\n\"devices\" : [\n";
+    sstream << "{\n\"devices\" : [\n";
     ctx.sref_list.push_back(sref);
     while(ctx.sref_list.size()) 
       do_select(ctx);
-    cout << "{}]\n}\n";
+    sstream << "{}]\n}\n";
   }
-
-  return 0;
 }

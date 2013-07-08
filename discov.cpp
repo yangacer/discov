@@ -5,6 +5,8 @@
 #include <iostream>
 #include "dns_sd.h"
 
+namespace {
+
 struct context
 {
   std::vector<DNSServiceRef> sref_list;
@@ -27,6 +29,8 @@ struct context
     sref_list.swap(pending_list);
   }
 };
+
+} // anonymous namespace
 
 static void DNSSD_API handle_getaddr(
   DNSServiceRef sref,

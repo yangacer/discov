@@ -1,11 +1,18 @@
+#ifdef _WIN32
+#pragma warning ( disable : 4345 4819)
+#endif
 #include "discov.hpp"
 #include <Winsock2.h>
 #include <vector>
 #include <sstream>
+#include <fstream>
 #include <iostream>
 #include "dns_sd.h"
+#include "json/json.hpp"
 
 namespace {
+
+namespace json = yangacer::json;
 
 struct context
 {
@@ -13,6 +20,32 @@ struct context
   std::vector<DNSServiceRef> pending_list;
   std::stringstream *sstream_ptr;
   int wait_time;
+
+  context()
+  {
+    using namespace std;
+    ifstream fin;
+    fin.unsetf(ios::skipws);
+    fin.open("known_hosts", ios::binary | ios::in);
+    if(fin.is_open()) {
+      json::istream_iterator beg(fin), end;
+      json::phrase_parse(beg, end, known_hosts);
+      fin.close();
+    } else {
+      known_hosts = json::object_t();
+      mbof(known_hosts)["devices"] = json::array_t();
+    }
+  }
+
+  ~context()
+  {
+    using namespace std;
+    ofstream fout("known_hosts", ios::binary | ios::out | ios::trunc);
+    if(fout.is_open() )
+      json::pretty_print(fout, known_hosts);
+    fout.flush();
+    fout.close();
+  }
 
   void clear()
   {
@@ -28,6 +61,8 @@ struct context
     clear();
     sref_list.swap(pending_list);
   }
+  
+  json::var_t known_hosts;
 };
 
 } // anonymous namespace
@@ -54,6 +89,34 @@ static void DNSSD_API handle_getaddr(
   */
 }
 
+struct name_eq
+{
+  name_eq(std::string const &name)
+    : name(name)
+    {}
+
+  bool operator()(json::var_t const &val) const
+  {
+    return cmbof(val)["name"].string() == name;
+  }
+
+  std::string const &name;
+};
+
+static json::object_t parse_txtrecord(unsigned char const *txt, uint16_t size)
+{
+  using namespace std;
+  json::object_t rt;
+  stringstream sin(string((char const*)txt, size));
+  string line;
+  while(getline(sin, line, (char)0x1a)) {
+    auto pos = line.find("=");
+    if( pos != string::npos )
+      rt[line.substr(0, pos).c_str()] = line.substr(pos+1);
+  }
+  return rt;
+}
+
 static void DNSSD_API handle_resolve(
   DNSServiceRef sref,
   DNSServiceFlags flags,
@@ -69,6 +132,8 @@ static void DNSSD_API handle_resolve(
   using namespace std;
 
   context *myctx = (context*)ctx;
+  json::array_t &hosts = 
+    mbof(myctx->known_hosts)["devices"].array();
   DNSServiceRef myref = 0;
   DNSServiceErrorType myec;
   stringstream &os = *myctx->sstream_ptr;
@@ -85,20 +150,21 @@ static void DNSSD_API handle_resolve(
     if(!myec) {
       myctx->pending_list.push_back(myref);
     }
-    string n(name);
-    os<< "{\n\"name\" : \"" << n.substr(0, n.find("._")) << "\",\n" ;
-    stringstream addr;
-    addr << "\"host\" : \"" << target;
-    addr.seekp(-1, ios::end) << ":" << ntohs(port);
-    os << addr.str() ;
-    for(uint16_t i = 0; i != txtLen; ++i)
-      if(txtRecord[i] == 0x1a)
-        os << "\",\n\"";
-      else if(txtRecord[i] == '=')
-        os << "\" : \"";
-      else
-        os << txtRecord[i];
-    os << "\"\n},\n";
+    string brief(name);
+    brief = brief.substr(0, brief.find("._"));
+    if( hosts.end() == find_if(hosts.begin(), hosts.end(), name_eq(brief)) ) {
+      stringstream addr;
+      addr << target;
+      addr.seekp(-1, ios::end) << ":" << ntohs(port);
+      
+      json::object_t obj;
+      mbof(obj["name"]) = brief;
+      mbof(obj["host"]) = addr.str();
+      // parse txtRecord
+      auto txt = parse_txtrecord(txtRecord, txtLen);
+      obj.insert(txt.begin(), txt.end());
+      hosts.push_back(obj);
+    }
   }
 }
 
@@ -166,10 +232,10 @@ void discov(std::stringstream &sstream, char const* type, int wait_time)
   ec = DNSServiceBrowse(&sref, 0, 0, type, 0, &handle_browse, (void*)&ctx);
   
   if(!ec) {
-    sstream << "{\n\"devices\" : [\n";
     ctx.sref_list.push_back(sref);
     while(ctx.sref_list.size()) 
       do_select(ctx);
-    sstream << "{}]\n}\n";
+    json::pretty_print(sstream, ctx.known_hosts);
   }
 }
+

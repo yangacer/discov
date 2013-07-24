@@ -2,11 +2,20 @@
 #pragma warning ( disable : 4345 4819)
 #endif
 #include "discov.hpp"
+#ifdef _WIN32
 #include <Winsock2.h>
+#else
+#include <sys/select.h>
+#endif
 #include <vector>
 #include <sstream>
 #include <fstream>
-#include <iostream>
+#include <string>
+
+#include <cerrno>
+#include <cassert>
+
+//#include <iostream>
 #include "dns_sd.h"
 #include "json/json.hpp"
 
@@ -107,12 +116,21 @@ static json::object_t parse_txtrecord(unsigned char const *txt, uint16_t size)
 {
   using namespace std;
   json::object_t rt;
-  stringstream sin(string((char const*)txt, size));
-  string line;
-  while(getline(sin, line, (char)0x1a)) {
-    auto pos = line.find("=");
-    if( pos != string::npos )
-      rt[line.substr(0, pos).c_str()] = line.substr(pos+1);
+  uint8_t pair_len = 0;
+  while(size) {
+    pair_len = txt[0];
+    size--;
+    txt++;
+    uint8_t const *end = txt + pair_len;
+    uint8_t const *pos = find(txt, end, 0x3du);
+    if( pos == end ) {
+      rt[string((char const*)txt, pair_len).c_str()] = true;
+    } else {
+      rt[string((char const*)txt, pos - txt).c_str()] =
+        string((char const*)pos+1, end - pos - 1);
+    }
+    txt += pair_len;
+    size -= pair_len;
   }
   return rt;
 }
@@ -152,7 +170,10 @@ static void DNSSD_API handle_resolve(
     }
     string brief(name);
     brief = brief.substr(0, brief.find("._"));
-    if( hosts.end() == find_if(hosts.begin(), hosts.end(), name_eq(brief)) ) {
+    hosts.erase(
+      remove_if(hosts.begin(), hosts.end(), name_eq(brief)),
+      hosts.end());
+    
       stringstream addr;
       addr << target;
       addr.seekp(-1, ios::end) << ":" << ntohs(port);
@@ -164,7 +185,6 @@ static void DNSSD_API handle_resolve(
       auto txt = parse_txtrecord(txtRecord, txtLen);
       obj.insert(txt.begin(), txt.end());
       hosts.push_back(obj);
-    }
   }
 }
 
@@ -196,22 +216,24 @@ void do_select(context &ctx)
 {
   fd_set fds;
   FD_ZERO(&fds);
-  
+  int maxfd = 0; 
   for(auto sref_iter = ctx.sref_list.begin(); sref_iter != ctx.sref_list.end(); ++sref_iter) {
     auto fd = DNSServiceRefSockFD(*sref_iter);
     FD_SET(fd, &fds);
+    if(fd > maxfd) maxfd = fd;
   }
-  for(int i=0; i < 100; ++i) {
-    struct timeval tv = { ctx.wait_time, 0 };
-    while( 0 < select(0, &fds, 0, 0, &tv) ) {
-      for(auto sref_iter = ctx.sref_list.begin(); sref_iter != ctx.sref_list.end(); ++sref_iter) {
-        auto fd = DNSServiceRefSockFD(*sref_iter);
-        if( FD_ISSET(fd, &fds) ) {
-          // Invoke callback
-          DNSServiceErrorType ec = DNSServiceProcessResult(*sref_iter);
-          DNSServiceRefDeallocate(*sref_iter);
-          *sref_iter = 0;
-        }
+  int active;
+  struct timeval tv = { ctx.wait_time, 0 };
+  while ( 0 < (active = select(maxfd+1, &fds, 0, 0, &tv)) ) {
+    assert(errno != EINVAL && "exceed nfsd size");
+    for(auto sref_iter = ctx.sref_list.begin(); sref_iter != ctx.sref_list.end(); ++sref_iter) {
+      auto fd = DNSServiceRefSockFD(*sref_iter);
+      if( FD_ISSET(fd, &fds) ) {
+        // Invoke callback
+        DNSServiceErrorType ec = DNSServiceProcessResult(*sref_iter);
+        DNSServiceRefDeallocate(*sref_iter);
+        *sref_iter = 0;
+        FD_CLR(fd, &fds);
       }
     }
   }

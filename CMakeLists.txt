@@ -14,7 +14,7 @@ link_directories ( ${PROJECT_SOURCE_DIR} )
 add_subdirectory ( JSON-CC )
 
 if( MSVC )
-  set ( DEPEND_LIB ws32 dnssd )
+  set ( DEPEND_LIB ws2_32 dnssd )
 endif()
 
 add_library ( libdiscov discov.cpp )

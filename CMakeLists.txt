@@ -23,3 +23,6 @@ target_link_libraries ( libdiscov ${DEPEND_LIB} json )
 add_executable( discov main.cpp )
 target_link_libraries ( discov ${DEPEND_LIB} libdiscov )
 
+
+install ( FILES discov.hpp DESTINATION include )
+install ( TARGETS libdiscov DESTINATION lib )

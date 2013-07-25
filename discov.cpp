@@ -223,9 +223,10 @@ void do_select(context &ctx)
     if(fd > maxfd) maxfd = fd;
   }
   int active;
-  struct timeval tv = { ctx.wait_time, 0 };
+  struct timeval tv = { ctx.wait_time, 5000 };
   while ( 0 < (active = select(maxfd+1, &fds, 0, 0, &tv)) ) {
     assert(errno != EINVAL && "exceed nfsd size");
+    maxfd = 0;
     for(auto sref_iter = ctx.sref_list.begin(); sref_iter != ctx.sref_list.end(); ++sref_iter) {
       auto fd = DNSServiceRefSockFD(*sref_iter);
       if( FD_ISSET(fd, &fds) ) {
@@ -234,9 +235,12 @@ void do_select(context &ctx)
         DNSServiceRefDeallocate(*sref_iter);
         *sref_iter = 0;
         FD_CLR(fd, &fds);
+      } else {
+        FD_SET(fd, &fds);
+        if(fd > maxfd) maxfd = fd;
       }
-    }
-  }
+    } // foreach sref_list
+  } // while(select)
   ctx.swap();
 }
 

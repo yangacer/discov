@@ -16,7 +16,7 @@ int main(int argc, char **argv)
 
   stringstream ss;
 
-  discov(ss, argv[1], 2);
+  discov(ss, argv[1], 0);
 
   cout << ss.str() << "\n";
 

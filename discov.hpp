@@ -3,6 +3,6 @@
 
 #include <sstream>
 
-void discov(std::stringstream &sstream, char const *type, int wait_time = 2);
+void discov(std::stringstream &sstream, char const *type, int wait_time = 2, char const *prefix = ".");
 
 #endif

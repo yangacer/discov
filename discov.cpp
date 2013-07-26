@@ -29,13 +29,15 @@ struct context
   std::vector<DNSServiceRef> pending_list;
   std::stringstream *sstream_ptr;
   int wait_time;
+  std::string prefix;
 
-  context()
+  context(std::string const &pref)
+    : prefix(pref)
   {
     using namespace std;
     ifstream fin;
     fin.unsetf(ios::skipws);
-    fin.open("known_hosts", ios::binary | ios::in);
+    fin.open((prefix + "known_hosts").c_str(), ios::binary | ios::in);
     if(fin.is_open()) {
       json::istream_iterator beg(fin), end;
       json::phrase_parse(beg, end, known_hosts);
@@ -49,7 +51,7 @@ struct context
   ~context()
   {
     using namespace std;
-    ofstream fout("known_hosts", ios::binary | ios::out | ios::trunc);
+    ofstream fout((prefix + "known_hosts").c_str(), ios::binary | ios::out | ios::trunc);
     if(fout.is_open() )
       json::pretty_print(fout, known_hosts);
     fout.flush();
@@ -244,11 +246,11 @@ void do_select(context &ctx)
   ctx.swap();
 }
 
-void discov(std::stringstream &sstream, char const* type, int wait_time)
+void discov(std::stringstream &sstream, char const* type, int wait_time, char const *prefix)
 {
   using namespace std;
 
-  context ctx;
+  context ctx(prefix);
   DNSServiceRef sref = 0;
   DNSServiceErrorType ec = 0;
 

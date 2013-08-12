@@ -26,3 +26,9 @@ target_link_libraries ( discov ${DEPEND_LIB} libdiscov )
 
 install ( FILES discov.hpp DESTINATION include )
 install ( TARGETS libdiscov DESTINATION lib )
+
+if ( MSVC )
+  install ( FILES dns_sd.h DESTINATION include )
+  install ( FILES dnssd.dll DESTINATION bin )
+endif()
+
